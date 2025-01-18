@@ -5,17 +5,55 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { useForm } from 'react-hook-form';
 import * as z from 'zod';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
-import { Card, CardContent, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { PlusCircle, Edit, Plus, Minus } from 'lucide-react';
-import { createRecipe } from '@/services';
-import { getAllCategories } from '@/services';
-// Define Zod schemas
+import { Plus, Minus } from 'lucide-react';
+
+import { createRecipe, getAllCategories, updateRecipe, uploadImageToCloudinary } from '@/services';
+
+/* -------------------------------------------------------------------------
+ * TypeScript Interfaces
+ * ------------------------------------------------------------------------- */
+export interface Category {
+  _id: string;
+  name: string;
+  description?: string;
+  icon?: string;
+  [key: string]: any; // fallback for extra fields if needed
+}
+
+export interface Ingredient {
+  name: string;
+  quantity: string;
+  unit: string;
+}
+
+export interface RecipeData {
+  title: string;
+  description?: string;
+  ingredients: Ingredient[];
+  instructions: string;
+  category: string;
+  prepTime: number;
+  cookTime: number;
+  servings: number;
+  image?: string;
+}
+
+interface RecipeModalProps {
+  isEdit?: boolean;
+  recipe?: RecipeData | null;
+  trigger: React.ReactNode;
+  // Add a callback for when the recipe is successfully created or updated
+  onSuccess?: () => void;
+}
+
+/* -------------------------------------------------------------------------
+ * Zod Schemas
+ * ------------------------------------------------------------------------- */
 const ingredientSchema = z.object({
   name: z.string().min(1, 'Ingredient name is required'),
   quantity: z.string().min(1, 'Quantity is required'),
@@ -31,114 +69,165 @@ const recipeFormSchema = z.object({
   prepTime: z.string().min(1, 'Prep time is required'),
   cookTime: z.string().min(1, 'Cook time is required'),
   servings: z.string().min(1, 'Number of servings is required'),
-  status: z.enum(['pending', 'approved', 'removed']).default('pending'),
+  image: z.string().optional(),
 });
 
-export const RecipeModal = ({ isEdit = false, recipe = null, children, trigger }) => {
+type RecipeFormType = z.infer<typeof recipeFormSchema>;
+
+/* -------------------------------------------------------------------------
+ * RecipeModal Component
+ * ------------------------------------------------------------------------- */
+export const RecipeModal: React.FC<RecipeModalProps> = ({ isEdit = false, recipe = null, trigger, onSuccess }) => {
   const [open, setOpen] = useState(false);
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>{trigger}</DialogTrigger>
-      <DialogContent className='max-w-2xl'>
+      <DialogContent className='max-h-[70vh] max-w-2xl overflow-y-auto'>
         <DialogHeader>
           <DialogTitle>{isEdit ? 'Edit Recipe' : 'Create New Recipe'}</DialogTitle>
         </DialogHeader>
-        <RecipeForm isEdit={isEdit} initialData={recipe} onClose={() => setOpen(false)} />
+        <RecipeForm
+          isEdit={isEdit}
+          initialData={recipe}
+          onClose={() => setOpen(false)}
+          onSuccess={onSuccess} // pass it down to form
+        />
       </DialogContent>
     </Dialog>
   );
 };
 
-const RecipeForm = ({ isEdit = false, initialData = null, onClose }) => {
-  const [previewUrl, setPreviewUrl] = useState('');
+/* -------------------------------------------------------------------------
+ * RecipeForm Component
+ * ------------------------------------------------------------------------- */
+interface RecipeFormProps {
+  isEdit: boolean;
+  initialData: RecipeData | null;
+  onClose: () => void;
+  onSuccess?: () => void;
+}
 
-  const [categories, setCategories] = useState<string[]>([]);
+const RecipeForm: React.FC<RecipeFormProps> = ({ isEdit, initialData, onClose, onSuccess }) => {
+  const [categories, setCategories] = useState<Category[]>([]);
   const [loadingCategories, setLoadingCategories] = useState<boolean>(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
 
-  // Fetch categories when the component mounts
+  // Local preview of selected file
+  const [localPreviewUrl, setLocalPreviewUrl] = useState('');
+  // Track whether the image is in the process of uploading
+  const [isImageUploading, setIsImageUploading] = useState(false);
+
+  // Fetch categories on mount
   useEffect(() => {
-    const fetchCategories = async () => {
+    const fetchData = async () => {
       try {
         setLoadingCategories(true);
         setFetchError(null);
-
         const data = await getAllCategories();
-        // data should be an array of category objects, e.g. [{ id, name, ... }, ...]
-        // Adjust to whatever structure your API returns
-        console.log('getAllCategories', data);
-        // For example, if each category is { id, name, ... }, you might store them directly
         setCategories(data);
       } catch (error) {
-        console.error('Error fetching categories:', error);
         setFetchError('Failed to fetch categories');
+        console.error('Error fetching categories:', error);
       } finally {
         setLoadingCategories(false);
       }
     };
-
-    fetchCategories();
+    fetchData();
   }, []);
 
-  // Initialize form with react-hook-form and zod resolver
-  const form = useForm({
+  // Set up form with default values
+  const form = useForm<RecipeFormType>({
     resolver: zodResolver(recipeFormSchema),
     defaultValues: {
       title: initialData?.title || '',
       description: initialData?.description || '',
       ingredients: initialData?.ingredients || [{ name: '', quantity: '', unit: '' }],
       instructions: initialData?.instructions || '',
-      category: initialData?.category || 'none',
+      category: initialData?.category || '',
       prepTime: initialData?.prepTime?.toString() || '',
       cookTime: initialData?.cookTime?.toString() || '',
       servings: initialData?.servings?.toString() || '',
-      status: initialData?.status || 'pending',
+      image: initialData?.image || '',
     },
   });
 
+  /* -----------------------------------------------------------------------
+   * Ingredient handlers
+   * ----------------------------------------------------------------------- */
   const addIngredient = () => {
-    const currentIngredients = form.getValues('ingredients');
-    form.setValue('ingredients', [...currentIngredients, { name: '', quantity: '', unit: '' }]);
+    const current = form.getValues('ingredients');
+    form.setValue('ingredients', [...current, { name: '', quantity: '', unit: '' }]);
   };
 
   const removeIngredient = (index: number) => {
-    const currentIngredients = form.getValues('ingredients');
-    if (currentIngredients.length > 1) {
+    const current = form.getValues('ingredients');
+    if (current.length > 1) {
       form.setValue(
         'ingredients',
-        currentIngredients.filter((_, i) => i !== index)
+        current.filter((_, i) => i !== index)
       );
     }
   };
 
-  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  /* -----------------------------------------------------------------------
+   * Image upload handler
+   * ----------------------------------------------------------------------- */
+  const handleImageChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      if (file.size > 5000000) {
-        form.setError('image', {
-          type: 'manual',
-          message: 'Image size should be less than 5MB',
-        });
-        return;
-      }
-      setPreviewUrl(URL.createObjectURL(file));
+    if (!file) return;
+
+    // Show immediate local preview (optional but nice UX)
+    const objectUrl = URL.createObjectURL(file);
+    setLocalPreviewUrl(objectUrl);
+
+    // Mark uploading as true
+    setIsImageUploading(true);
+
+    if (file.size > 5_000_000) {
+      form.setError('image', { type: 'manual', message: 'Image size should be less than 5MB' });
+      setIsImageUploading(false);
+      return;
+    }
+
+    try {
+      const uploadResponse = await uploadImageToCloudinary(file);
+      form.setValue('image', uploadResponse.url);
+    } catch (error) {
+      form.setError('image', { type: 'manual', message: 'Failed to upload image' });
+    } finally {
+      setIsImageUploading(false);
     }
   };
 
-  const onSubmit = async (data: z.infer<typeof recipeFormSchema>) => {
+  /* -----------------------------------------------------------------------
+   * Form submission
+   * ----------------------------------------------------------------------- */
+  const onSubmit = async (data: RecipeFormType) => {
+    if (isImageUploading) {
+      alert('Image is still uploading. Please wait...');
+      return;
+    }
+
     try {
-      // Transform data for submission
-      const submitData = {
+      const submitData: RecipeData = {
         ...data,
         prepTime: parseInt(data.prepTime),
         cookTime: parseInt(data.cookTime),
         servings: parseInt(data.servings),
       };
-      const res = await createRecipe(submitData);
-      console.log(res);
-      console.log('Form submitted:', submitData);
-      onClose?.();
+
+      if (isEdit && initialData?._id) {
+        await updateRecipe(initialData._id, submitData);
+      } else {
+        await createRecipe(submitData);
+      }
+
+      // When the server call succeeds:
+      // 1) Close the modal
+      onClose();
+      // 2) Trigger parent's callback
+      onSuccess?.();
     } catch (error) {
       console.error('Form submission error:', error);
     }
@@ -147,6 +236,7 @@ const RecipeForm = ({ isEdit = false, initialData = null, onClose }) => {
   return (
     <Form {...form}>
       <form onSubmit={form.handleSubmit(onSubmit)} className='space-y-6'>
+        {/* Title */}
         <FormField
           control={form.control}
           name='title'
@@ -154,13 +244,14 @@ const RecipeForm = ({ isEdit = false, initialData = null, onClose }) => {
             <FormItem>
               <FormLabel>Recipe Title *</FormLabel>
               <FormControl>
-                <Input className='border-2 border-black' {...field} />
+                <Input {...field} className='border-2 border-black' />
               </FormControl>
               <FormMessage />
             </FormItem>
           )}
         />
 
+        {/* Description */}
         <FormField
           control={form.control}
           name='description'
@@ -168,19 +259,20 @@ const RecipeForm = ({ isEdit = false, initialData = null, onClose }) => {
             <FormItem>
               <FormLabel>Description</FormLabel>
               <FormControl>
-                <Textarea className='border-2 border-black' {...field} />
+                <Textarea {...field} className='border-2 border-black' />
               </FormControl>
               <FormMessage />
             </FormItem>
           )}
         />
 
+        {/* Category */}
         <FormField
           control={form.control}
           name='category'
           render={({ field }) => (
             <FormItem>
-              <FormLabel>Category</FormLabel>
+              <FormLabel>Category *</FormLabel>
               <Select onValueChange={field.onChange} defaultValue={field.value}>
                 <FormControl>
                   <SelectTrigger className='border-2 border-black'>
@@ -193,11 +285,8 @@ const RecipeForm = ({ isEdit = false, initialData = null, onClose }) => {
                   ) : fetchError ? (
                     <SelectItem value='error'>Error loading categories</SelectItem>
                   ) : (
-                    categories.map((cat: any) => (
-                      <SelectItem
-                        key={cat._id}
-                        value={cat.name} // or cat._id, depending on your API
-                      >
+                    categories.map((cat) => (
+                      <SelectItem key={cat._id} value={cat.name}>
                         {cat.name}
                       </SelectItem>
                     ))
@@ -209,6 +298,7 @@ const RecipeForm = ({ isEdit = false, initialData = null, onClose }) => {
           )}
         />
 
+        {/* Prep Time, Cook Time, Servings */}
         <div className='grid grid-cols-3 gap-4'>
           <FormField
             control={form.control}
@@ -253,11 +343,13 @@ const RecipeForm = ({ isEdit = false, initialData = null, onClose }) => {
           />
         </div>
 
+        {/* Ingredients */}
         <div>
           <div className='mb-2 flex items-center justify-between'>
             <FormLabel>Ingredients</FormLabel>
             <Button type='button' onClick={addIngredient} variant='outline' size='sm' className='border-2 border-black'>
-              <Plus className='mr-1 h-4 w-4' /> Add Ingredient
+              <Plus className='mr-1 h-4 w-4' />
+              Add Ingredient
             </Button>
           </div>
 
@@ -316,6 +408,7 @@ const RecipeForm = ({ isEdit = false, initialData = null, onClose }) => {
           ))}
         </div>
 
+        {/* Instructions */}
         <FormField
           control={form.control}
           name='instructions'
@@ -330,21 +423,33 @@ const RecipeForm = ({ isEdit = false, initialData = null, onClose }) => {
           )}
         />
 
-        {/* <div>
-          <FormLabel>Recipe Image</FormLabel>
-          <Input type='file' accept='image/*' onChange={handleImageChange} className='border-2 border-black' />
-          {previewUrl && (
-            <div className='mt-2'>
-              <img src={previewUrl} alt='Preview' className='h-32 w-32 rounded-lg border-2 border-black object-cover' />
-            </div>
-          )}
-        </div> */}
+        {/* Image Upload */}
+        <FormLabel>Recipe Image</FormLabel>
+        <Input
+          type='file'
+          accept='image/*'
+          onChange={handleImageChange}
+          // Optionally disable if we don't want them changing images while already uploading
+          disabled={isImageUploading}
+        />
 
+        {/* Show Local Preview (before Cloudinary upload finishes) */}
+        {localPreviewUrl && (
+          <div className='mt-2'>
+            <img src={localPreviewUrl} alt='Local Preview' className='h-32 w-32 object-cover' />
+          </div>
+        )}
+
+        {/* Indicate image is uploading */}
+        {isImageUploading && <p className='text-sm text-gray-600'>Uploading image. Please wait...</p>}
+
+        {/* Buttons */}
         <div className='flex justify-end space-x-4'>
           <Button type='button' variant='outline' className='border-2 border-black' onClick={onClose}>
             Cancel
           </Button>
-          <Button type='submit' className='bg-black text-white hover:bg-gray-800'>
+          {/* Disable the submit button if still uploading */}
+          <Button type='submit' className='bg-black text-white hover:bg-gray-800' disabled={isImageUploading}>
             {isEdit ? 'Update Recipe' : 'Create Recipe'}
           </Button>
         </div>

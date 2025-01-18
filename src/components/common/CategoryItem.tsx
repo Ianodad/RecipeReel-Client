@@ -54,10 +54,9 @@ export const CategoryItem: React.FC<CategoryItemProps> = ({ category, onDelete }
   return (
     <>
       <div
-        onClick={() => setShowDetailView(true)}
         className='flex transform cursor-pointer items-center justify-between rounded-lg border-2 border-black p-4 transition-all duration-200 ease-in-out hover:-translate-y-1 hover:bg-gray-50 hover:shadow-lg'
       >
-        <div>
+        <div onClick={() => setShowDetailView(true)}>
           <div className='mb-2 h-3 w-3 rounded-full' style={{ backgroundColor: category.color }} />
           <h3 className='font-semibold'>{category.name}</h3>
           <p className='text-sm text-gray-500'>{category.recipeCount} recipes</p>

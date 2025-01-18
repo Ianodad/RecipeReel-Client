@@ -26,9 +26,11 @@ interface CreateRecipeData {
   prepTime?: number;
   cookTime?: number;
   servings?: number;
+  image?: string;
 }
 
 interface UpdateRecipeData {
+  _id?: string;
   title?: string;
   description?: string;
   ingredients?: Ingredient[];
@@ -37,6 +39,7 @@ interface UpdateRecipeData {
   prepTime?: number;
   cookTime?: number;
   servings?: number;
+  image?: string;
 }
 
 // Get all recipes
@@ -114,6 +117,7 @@ export const getRecipesByUser = async () => {
 };
 // Create new recipe
 export const createRecipe = async (recipeData: CreateRecipeData): Promise<Recipe> => {
+  // console.log('recipeData', recipeData);
   try {
     const response = await apiService.post('/recipes', recipeData);
     return response.data;
@@ -124,7 +128,7 @@ export const createRecipe = async (recipeData: CreateRecipeData): Promise<Recipe
 };
 
 // Update recipe
-export const updateRecipe = async (recipeId: string, updateData: UpdateRecipeData): Promise<Recipe> => {
+export const updateRecipe = async (recipeId: string | number, updateData: UpdateRecipeData): Promise<Recipe> => {
   try {
     const response = await apiService.put(`/recipes/${recipeId}`, updateData);
     return response.data;
@@ -135,7 +139,7 @@ export const updateRecipe = async (recipeId: string, updateData: UpdateRecipeDat
 };
 
 // Delete recipe
-export const deleteRecipe = async (recipeId: string): Promise<void> => {
+export const deleteRecipe = async (recipeId: string | number): Promise<void> => {
   try {
     await apiService.delete(`/recipes/${recipeId}`);
   } catch (error) {

@@ -34,6 +34,7 @@ import {
   User,
   getRecipesByUser,
   getAllRecipes,
+  deleteRecipe,
 } from '@/services';
 import { useUserStore } from '@/zustand';
 const DashboardPage = () => {
@@ -113,40 +114,32 @@ const DashboardPage = () => {
     fetchUsers();
   }, [userRole]);
 
+  useEffect(() => {
+    fetchRecipes();
+  }, [userRole]);
+
   // ---------------------------
   // NEW: Fetch recipes
   // ---------------------------
-  useEffect(() => {
-    const fetchRecipes = async () => {
-      try {
-        setIsLoadingRecipes(true);
-
-        if (userRole === 'Admin') {
-          // Fetch all recipes
-          console.log('admin');
-          const data = await getAllRecipes(); // e.g. getAllRecipes({ status: 'approved' })
-          setRecipes(data);
-        } else if (userRole === 'Contributor') {
-          // Fetch recipes belonging to the logged-in user
-        console.log('Contributor', userRole);
-
-          const data = await getRecipesByUser();
-          setRecipes(data);
-        } else {
-          // If Viewer (or any other role), you can decide what to do,
-          // e.g., fetch nothing or fetch publicly available recipes
-          setRecipes([]);
-        }
-      } catch (error) {
-        setRecipeError('Failed to load recipes');
-        console.error('Error fetching recipes:', error);
-      } finally {
-        setIsLoadingRecipes(false);
+  const fetchRecipes = async () => {
+    try {
+      setIsLoadingRecipes(true);
+      if (userRole === 'Admin') {
+        const data = await getAllRecipes();
+        setRecipes(data);
+      } else if (userRole === 'Contributor') {
+        const data = await getRecipesByUser();
+        setRecipes(data);
+      } else {
+        setRecipes([]);
       }
-    };
-
-    fetchRecipes();
-  }, [userRole]);
+    } catch (error) {
+      setRecipeError('Failed to load recipes');
+      console.error('Error fetching recipes:', error);
+    } finally {
+      setIsLoadingRecipes(false);
+    }
+  };
 
   // Mocked user data (for your Profile Header)
   const userData = {
@@ -229,8 +222,23 @@ const DashboardPage = () => {
   };
 
   // If you want to allow recipe deletion from the UI
-  const handleDeleteRecipe = (recipeId: string | number) => {
-    setRecipes((prevRecipes) => prevRecipes.filter((recipe) => recipe.id !== recipeId));
+  const handleDeleteRecipe = async (recipeId: string | number) => {
+    // a) Store the current recipes in case we need to revert
+    const previousRecipes = recipes;
+
+    // b) Optimistically remove the recipe from UI
+    setRecipes((prevRecipes) => prevRecipes.filter((recipe) => recipe._id !== recipeId));
+
+    try {
+      // c) Call the API to delete on the server
+      await deleteRecipe(recipeId);
+      // If success, we do nothing else—UI is already updated
+      console.log(`Successfully deleted recipe ${recipeId}`);
+    } catch (error) {
+      // d) If there's an error, revert to previous state
+      console.error('Failed to delete recipe:', error);
+      setRecipes(previousRecipes);
+    }
   };
 
   // --------------------------------------------------
@@ -311,6 +319,7 @@ const DashboardPage = () => {
             <CardHeader className='flex flex-row items-center justify-between'>
               <CardTitle>{userRole === 'Admin' ? 'All Recipes' : 'My Recipes'}</CardTitle>
               <RecipeModal
+                onSuccess={fetchRecipes}
                 trigger={
                   <Button className='bg-black text-white hover:bg-gray-800'>
                     <PlusCircle className='mr-2 h-4 w-4' />
@@ -328,7 +337,7 @@ const DashboardPage = () => {
                 <div className='flex justify-center py-6 text-red-500'>
                   <p>{recipeError}</p>
                 </div>
-              ) : !recipes || recipes.length === 0  ? (
+              ) : !recipes || recipes.length === 0 ? (
                 <div className='flex justify-center py-6'>
                   <p>No recipes on the list.</p>
                 </div>
