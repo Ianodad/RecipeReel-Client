@@ -125,8 +125,8 @@ const DashboardPage = () => {
     try {
       setIsLoadingRecipes(true);
       if (userRole === 'Admin') {
-        const data = await getAllRecipes();
-        setRecipes(data);
+        const { recipes, totalPages } = await getAllRecipes();
+        setRecipes(recipes);
       } else if (userRole === 'Contributor') {
         const data = await getRecipesByUser();
         setRecipes(data);

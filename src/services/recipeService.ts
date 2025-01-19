@@ -10,6 +10,7 @@ interface Recipe {
   prepTime: number;
   cookTime: number;
   servings: number;
+  image: string;
 }
 
 interface Ingredient {
@@ -27,6 +28,10 @@ interface CreateRecipeData {
   cookTime?: number;
   servings?: number;
   image?: string;
+}
+interface RecipeData {
+  recipes: Recipe[];
+  totalPages: number;
 }
 
 interface UpdateRecipeData {
@@ -54,7 +59,7 @@ interface RecipeQueryParams {
 }
 
 // Updated getAllRecipes without pagination response
-export const getAllRecipes = async (params: RecipeQueryParams = {}): Promise<Recipe[]> => {
+export const getAllRecipes = async (params: RecipeQueryParams = {}): Promise<RecipeData> => {
   try {
     // Convert params to query string parameters
     const queryParams = new URLSearchParams();
@@ -80,13 +85,12 @@ export const getAllRecipes = async (params: RecipeQueryParams = {}): Promise<Rec
 
     // Add status filter (default to approved)
     queryParams.append('status', params.status || 'approved');
-    console.log('geere');
     // Make the API call with query parameters
     const response = await apiService.get(`/recipes?${queryParams.toString()}`);
-    console.log('responseALl', response.data.recipes.docs);
+    console.log('responseALl', response.data);
 
     // Return the array of recipes directly
-    return response.data.recipes.docs || [];
+    return response.data || [];
   } catch (error) {
     console.error('Failed to fetch recipes:', error);
     throw error;
